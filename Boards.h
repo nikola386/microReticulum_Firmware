@@ -104,6 +104,8 @@
   #define MODEL_C6            0xC6 // Heltec Mesh Node T114, 470-510 MHz
   #define MODEL_C7            0xC7 // Heltec Mesh Node T114, 863-928 MHz
 
+  #define BOARD_XIAO_NRF52840 0x74 // Xiao Seed NRF52
+
   #define PRODUCT_TECHO       0x15 // LilyGO T-Echo devices
   #define BOARD_TECHO         0x44
   #define MODEL_16            0x16 // T-Echo 433 MHz
@@ -141,6 +143,8 @@
 
   #ifndef MODEM
     #if BOARD_MODEL == BOARD_RAK4631
+      #define MODEM SX1262
+    #elif BOARD_MODEL == BOARD_XIAO_NRF52840
       #define MODEM SX1262
     #elif BOARD_MODEL == BOARD_GENERIC_NRF52
       #define MODEM SX1262
@@ -889,6 +893,43 @@
       const int DISPLAY_CLK = PIN_T114_TFT_SCK;
       const int DISPLAY_BL_PIN = PIN_T114_TFT_BLGT;
       const int DISPLAY_RST = PIN_T114_TFT_RST;
+
+    #elif BOARD_MODEL == BOARD_XIAO_NRF52840
+      #define PLATFORM          PLATFORM_NRF52
+      #define MCU_VARIANT       MCU_NRF52
+      #define MODEM             SX1262
+
+      #define HAS_PMU           false
+      #define HAS_TCXO          false
+      #define HAS_BUSY          true
+      #define HAS_RF_SWITCH_RX_TX true
+      #define HAS_NP            false
+      #define HAS_DISPLAY       false
+      #define HAS_BLE           true
+      #define HAS_BLUETOOTH     false
+      #define HAS_CONSOLE       false
+      #define DIO2_AS_RF_SWITCH false
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define BLE_MANUFACTURER  "Seeed"
+      #define BLE_MODEL         "Xiao NRF52840"
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      
+
+      const int pin_reset       = (int)D0;
+      const int pin_cs          = (int)D4;
+      const int pin_busy        = (int)D3;
+      const int pin_dio         = (int)D1;
+      const int pin_rxen        = (int)D5;
+      const int pin_txen        = -1;
+      const int pin_tcxo_enable = -1;
+      const int pin_sclk        = (int)D8;
+      const int pin_mosi        = (int)D10;
+      const int pin_miso        = (int)D9;
+      const int pin_led_rx      = (int)12;
+      const int pin_led_tx      = (int)13;
 
     #else
       #error An unsupported nRF board was selected. Cannot compile RNode firmware.

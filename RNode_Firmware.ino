@@ -20,6 +20,7 @@
 #include <Interface.h>
 #include <Log.h>
 #include <Bytes.h>
+#include <queue>
 #endif
 #if defined(UDP_TRANSPORT)
 #include "UDPInterface.h"
@@ -28,6 +29,13 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include "Utilities.h"
+
+// CBA FileSystem
+#if defined(RNS_USE_FS)
+#include "FileSystem.h"
+#else
+#include "NoopFileSystem.h"
+#endif
 
 // CBA SD
 #if HAS_SDCARD
@@ -230,45 +238,20 @@ void on_transmit_packet(const RNS::Bytes& raw, const RNS::Interface& interface) 
 // CBA RNS
 RNS::Reticulum reticulum(RNS::Type::NONE);
 RNS::Interface lora_interface(RNS::Type::NONE);
-#if defined(RNS_USE_FS)
-  // CBA microStore
-  #if MCU_VARIANT == MCU_ESP32
-    #if defined(USE_FLASHFS)
-      #include <microStore/Adapters/FlashFileSystem.h>
-      microStore::FileSystem filesystem{microStore::Adapters::FlashFileSystem()};
-    #else
-      //#include <microStore/Adapters/SPIFFSFileSystem.h>
-      //microStore::FileSystem filesystem{microStore::Adapters::SPIFFSFileSystem()};
-      //#include <microStore/Adapters/LittleFSFileSystem.h>
-      //microStore::FileSystem filesystem{microStore::Adapters::LittleFSFileSystem()};
-      #include <microStore/Adapters/PosixFileSystem.h>
-      microStore::FileSystem filesystem{microStore::Adapters::PosixFileSystem()};
-    #endif
-  #elif MCU_VARIANT == MCU_NRF52
-    #if defined(USE_FLASHFS)
-      #include <microStore/Adapters/FlashFileSystem.h>
-      microStore::FileSystem filesystem{microStore::Adapters::FlashFileSystem()};
-    #else
-      #include <microStore/Adapters/InternalFSFileSystem.h>
-      microStore::FileSystem filesystem{microStore::Adapters::InternalFSFileSystem()};
-    #endif
-  #else
-    #include <microStore/Adapters/PosixFileSystem.h>
-    microStore::FileSystem filesystem{microStore::Adapters::PosixFileSystem()};
-  #endif
-  #else // RNS_USE_FS
-    microStore::FileSystem filesystem{microStore::Adapters::NoopFileSystem()};
-  #endif // RNS_USE_FS
+RNS::FileSystem filesystem(RNS::Type::NONE);
 #endif  // HAS_RNS
 
-// CBA For printf
-int _write(int file, char *ptr, int len) {
-    size_t wrote = Serial.write(ptr, len);
-    Serial.flush();
-    return wrote;
-}
-
 void setup() {
+
+  pinMode(LED_RED,   OUTPUT); digitalWrite(LED_RED,   HIGH);
+  pinMode(LED_GREEN, OUTPUT); digitalWrite(LED_GREEN, HIGH);
+  pinMode(LED_BLUE,  OUTPUT); digitalWrite(LED_BLUE,  HIGH);
+    
+  // Blink red 5 times fast so we know we entered setup()
+  for(int i=0;i<5;i++){
+    digitalWrite(LED_RED, LOW);  delay(100);
+    digitalWrite(LED_RED, HIGH); delay(100);
+  }
 
   // Initialise serial communication
   memset(serialBuffer, 0, sizeof(serialBuffer));
@@ -286,14 +269,8 @@ void setup() {
   // CBA Test
   delay(2000);
 
-  printf("Total SRAM: %u bytes\n", RNS::Utilities::Memory::heap_size());
-  printf("Free SRAM:  %u bytes\n", RNS::Utilities::Memory::heap_available());
-#if defined(ESP32)
-	printf("Total PSRAM: %u bytes\n", ESP.getPsramSize());
-#endif
-	//printf("Total flash: %zu bytes\n", RNS::Utilities::OS::storage_size());
-
   // Configure WDT
+  Serial.println("CHECKPOINT 3");
   #if MCU_VARIANT == MCU_ESP32
     #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
       esp_task_wdt_config_t wdt_config = {
@@ -317,7 +294,7 @@ void setup() {
     NRF_WDT->RREN           = 0x01;           // Enable the RR[0] reload register
     NRF_WDT->TASKS_START    = 1;              // Start WDT
   #endif
-
+  Serial.println("CHECKPOINT 4");
   #if MCU_VARIANT == MCU_ESP32
     boot_seq();
     EEPROM.begin(EEPROM_SIZE);
@@ -335,7 +312,7 @@ void setup() {
       pinMode(DISPLAY_BL_PIN, OUTPUT);
     #endif
   #endif
-
+  Serial.println("CHECKPOINT 5");
   #if MCU_VARIANT == MCU_NRF52
     #if BOARD_MODEL == BOARD_TECHO
       delay(200);
@@ -351,7 +328,7 @@ void setup() {
 
     if (!eeprom_begin()) { Serial.write("EEPROM initialisation failed.\r\n"); }
   #endif
-
+  Serial.println("CHECKPOINT 6");
   // Seed the PRNG for CSMA R-value selection
   #if MCU_VARIANT == MCU_ESP32
     // On ESP32, get the seed value from the
@@ -381,15 +358,18 @@ void setup() {
   #if MCU_VARIANT == MCU_NRF52 && HAS_NP == true
     boot_seq();
   #endif
-
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4
+  Serial.println("CHECKPOINT 7");
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 \
+    && BOARD_MODEL != BOARD_TECHO   && BOARD_MODEL != BOARD_T3S3 \
+    && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4 \
+    && BOARD_MODEL != BOARD_XIAO_NRF52840
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
     // is disabled on this platform.
     while (!Serial);
   #endif
-
+  Serial.println("CHECKPOINT 8");
   serial_interrupt_init();
 
   // Configure input and output pins
@@ -408,7 +388,7 @@ void setup() {
         digitalWrite(pin_tcxo_enable, HIGH);
     }
   #endif
-
+  Serial.println("CHECKPOINT 9");
   // Initialise buffers
   memset(pbuf, 0, sizeof(pbuf));
   memset(cmdbuf, 0, sizeof(cmdbuf));
@@ -420,7 +400,7 @@ void setup() {
   
   memset(packet_lengths_buf, 0, sizeof(packet_starts_buf));
   fifo16_init(&packet_lengths, packet_lengths_buf, CONFIG_QUEUE_MAX_LENGTH);
-
+  Serial.println("CHECKPOINT 10");
   #if PLATFORM == PLATFORM_ESP32 || PLATFORM == PLATFORM_NRF52
     modem_packet_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
   #endif
@@ -434,7 +414,7 @@ void setup() {
   #elif MODEM == SX1280
   LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy, pin_rxen, pin_txen);
   #endif
-  
+  Serial.println("CHECKPOINT 11");
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     init_channel_stats();
 
@@ -485,7 +465,7 @@ void setup() {
     // so assume that to be the case for now.
     modem_installed = true;
   #endif
-
+  Serial.println("CHECKPOINT 12");
   #if HAS_DISPLAY
     #if HAS_EEPROM
     if (EEPROM.read(eeprom_addr(ADDR_CONF_DSET)) != CONF_OK_BYTE) {
@@ -507,7 +487,7 @@ void setup() {
     disp_ready = display_init();
     update_display();
   #endif
-
+  Serial.println("CHECKPOINT 13");
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     #if HAS_PMU == true
       pmu_ready = init_pmu();
@@ -532,7 +512,7 @@ void setup() {
       kiss_indicate_reset();
     }
   #endif
-
+  Serial.println("CHECKPOINT 14");
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     #if MODEM == SX1280
       avoid_interference = false;
@@ -551,7 +531,7 @@ void setup() {
 
   // Validate board health, EEPROM and config
   validate_status();
-
+  Serial.println("CHECKPOINT 15");
   if (op_mode != MODE_TNC) LoRa->setFrequency(0);
 
   // CBA SD
@@ -582,79 +562,86 @@ void setup() {
   }
   delay(3000);
 #endif
-
+  Serial.println("CHECKPOINT 16");
 #ifdef HAS_RNS
   try {
     // CBA Init filesystem
-    HEAD("Initializing filesystem...", RNS::LOG_TRACE);
-    filesystem.init();
+#if defined(RNS_USE_FS)
+    filesystem = new FileSystem();
+    ((FileSystem*)filesystem.get())->init();
+#else
+    filesystem = new NoopFileSystem();
+    ((FileSystem*)filesystem.get())->init();
+#endif
 
-    // Remove legacy files
-    if (filesystem.exists("/destination_table")) filesystem.remove("/destination_table");
-    if (filesystem.isDirectory("/cache")) {
-      filesystem.listDirectory("/cache", [&](const char* path) -> void {
-        char rmpath[64];
-        snprintf(rmpath, 64, "/cache/%s", path);
-        filesystem.remove(rmpath);
-      });
-      filesystem.rmdir("/cache");
-    }
-
-    // If filesystem is essentially full then clear all path store files
-    if (filesystem.storageAvailable() < 1024) {
-      WARNING("FileSystem is full, clearing space...");
-      // CBA Delete the path store index file to force a rebuild
-      filesystem.remove("/path_store_index.dat");
-      // CBA Remove all path store data files
-      filesystem.remove("/path_store_0.dat");
-      filesystem.remove("/path_store_1.dat");
-      filesystem.remove("/path_store_2.dat");
-      filesystem.remove("/path_store_3.dat");
-      filesystem.remove("/path_store_4.dat");
-      filesystem.remove("/path_store_5.dat");
-      filesystem.remove("/path_store_6.dat");
-      filesystem.remove("/path_store_7.dat");
-    }
-
-    TRACE("Registering filesystem...");
+    HEAD("Registering filesystem...", RNS::LOG_TRACE);
     RNS::Utilities::OS::register_filesystem(filesystem);
 
-#if !defined(NDEBUG) && defined(RNS_USE_FS)
-#if 0
-    filesystem.format();
+#ifndef NDEBUG
+    //filesystem.remove_directory("/cache");
+    //filesystem.remove_file("/destination_table");
+    //filesystem.reformat();
+    TRACE("Listing filesystem...");
+#if defined(RNS_USE_FS)
+    //FileSystem::listDir("/");
 #endif
-#if 1
-    Serial.println("Listing filesystem /:");
-    filesystem.listDirectory("/", [&](const char* path) -> void {
-      Serial.println(path);
-    });
-#endif
-#endif // !NDEBUG && RNS_USE_FS
+    TRACE("Finished listing");
+    //TRACE("Dumping filesystem...");
+    //FileSystem::dumpDir("/");
+    //TRACE("Finished dumping");
+    //reticulum.clear_caches();
+
+    // CBA DEBUG
+/*
+    std::list<std::string> files = filesystem.list_directory("/cache");
+    for (auto& file : files) {
+      Serial.print("  FILE: ");
+      Serial.println(file.c_str());
+      //RNS::Bytes content = filesystem.read_file(file.c_str());
+      //DEBUG(std::string("FILE: ") + file);
+      //DEBUG(content.toString());
+      }
+*/
+/*
+    TRACE("FILE: destination_table");
+    RNS::Bytes content;
+    if (filesystem.read_file("/destination_table", content) > 0) {
+      TRACE(content.toString().c_str());
+    }
+*/
+#endif  // NDEBUG
 
     // CBA Start RNS
-    //if (hw_ready) {
-    if (true) {
+    if (hw_ready) {
 
       // Set sane memory limits based on hardware-specific availability
-      RNS::Transport::path_table_maxsize(URTN_PATH_TABLE_MAX_RECS);
+#if defined(BOARD_HAS_PSRAM)
+      RNS::Transport::path_table_maxsize(500);
+      RNS::Transport::path_table_maxpersist(500);
+      RNS::Transport::announce_table_maxsize(500);
+      RNS::Transport::hashlist_maxsize(500);
+      RNS::Identity::known_destinations_maxsize(500);
+      RNS::Transport::max_pr_tags(500);
+#else
+      RNS::Transport::path_table_maxsize(50);
+      RNS::Transport::path_table_maxpersist(50);
       RNS::Transport::announce_table_maxsize(50);
       RNS::Transport::hashlist_maxsize(50);
       RNS::Identity::known_destinations_maxsize(50);
       RNS::Transport::max_pr_tags(50);
+#endif
       RNS::Reticulum::clean_interval(60*15); // 60 minutes
       //RNS::Reticulum::clean_interval(60*15); // 15 minutes
       RNS::Reticulum::persist_interval(60*60); // 60 minutes
       //RNS::Reticulum::persist_interval(60*10); // 10 minutes
       //RNS::Reticulum::persist_interval(60); // 1 minute
 
-      //reticulum.clear_caches();
-
       // Configure callbacks
       RNS::set_log_callback(&on_log);
       RNS::Transport::set_receive_packet_callback(on_receive_packet);
       RNS::Transport::set_transmit_packet_callback(on_transmit_packet);
 
-      HEAD("Starting RNS...\r\n", RNS::LOG_VERBOSE);
+      Serial.write("Starting RNS...\r\n");
 #if defined(RNS_MEM_LOG)
       RNS::loglevel(RNS::LOG_MEM);
 #else
@@ -686,7 +673,7 @@ void setup() {
       RNS::Utilities::OS::set_loop_callback(&loop);
 
       // CBA load/create local destination for admin node
-#if 0
+/*
       RNS::Identity identity = {RNS::Type::NONE};
       std::string local_identity_path = RNS::Reticulum::_storagepath + "/local_identity";
       if (RNS::Utilities::OS::file_exists(local_identity_path.c_str())) {
@@ -701,7 +688,7 @@ void setup() {
         RNS::verbose("Loaded local identity from storage");
       }
       RNS::Destination destination(identity, RNS::Type::Destination::IN, RNS::Type::Destination::SINGLE, "rnstransport", "local");
-#endif
+*/
       RNS::Destination destination(RNS::Transport::identity(), RNS::Type::Destination::IN, RNS::Type::Destination::SINGLE, "rnstransport", "local");
 
       HEAD("RNS is READY!", RNS::LOG_TRACE);
@@ -712,7 +699,6 @@ void setup() {
         TRACEF("TX Power: %d dBm", lora_txp);
         TRACEF("Spreading Factor: %d", lora_sf);
         TRACEF("Coding Rate: %d", lora_cr);
-        HEAD("RNS Transport is READY!", RNS::LOG_TRACE);
       }
       else {
         HEAD("RNS transport mode is DISABLED", RNS::LOG_INFO);
